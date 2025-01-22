@@ -125,7 +125,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
         }
         return Task.CompletedTask;
     }
-    
+
     /// <summary>
     /// Kick a player from a room (only if the caller is host).
     /// </summary>
@@ -191,7 +191,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             if (Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
             {
                 room.UpdateMatchLabel(newLabel);
-                
+
                 _events.OnLabelUpdated(roomCode, newLabel);
             }
         }
@@ -259,13 +259,12 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
 
     private async Task ProcessMatchmakingQueueAsync()
     {
-        // We only do matching for the queue (NOT the manually created rooms).
         await _queueSemaphore.WaitAsync();
         try
         {
             if (_queue.IsEmpty) return;
 
-            var items = _queue.ToList(); // snapshot
+            var items = _queue.ToList(); // Snapshot of the queue
             if (items.Count == 0) return;
 
             // Group by label's identifier
@@ -274,59 +273,74 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             foreach (var group in groupedByLabelId)
             {
                 var groupItems = group.ToList();
-                var labelForEvent = groupItems.First().Label;
 
                 if (_options.ShufflePlayers)
                 {
-                    // Shuffle
                     groupItems = groupItems.OrderBy(_ => _random.Next()).ToList();
                 }
 
-                foreach (var item in groupItems)
+                var readyPlayers = groupItems
+                    .Where(i => (DateTime.UtcNow - i.EnqueuedTime) >= _options.MinimumWaitTime)
+                    .ToList();
+
+                while (readyPlayers.Count > 0)
                 {
-                    var waitTime = DateTime.UtcNow - item.EnqueuedTime;
-                    if (waitTime <= _options.MinimumWaitTime) 
-                        continue;
+                    var matchSize = readyPlayers[0].Label.GetMatchPlayersSize();
+                    var firstPlayerQueueInfo = readyPlayers[0];
+                    var waitTime = DateTime.UtcNow - firstPlayerQueueInfo.EnqueuedTime;
 
-                    // Attempt to gather 'matchSize'
-                    var matchSize = item.Label.GetMatchPlayersSize();
-                    var matched = groupItems.Take(matchSize).ToList();
-
-                    if (matched.Count == matchSize)
+                    if (readyPlayers.Count < matchSize)
                     {
-                        // Found enough players
-                        foreach (var m in matched)
-                            RemoveFromQueueInternal(m.Player, m.Label);
+                        // Not enough players to fill a match
+                        // Check if we've exceeded maximum wait time
+                        if (waitTime >= _options.MaximumWaitTime)
+                        {
+                            if (_options.EnableBotMatchmaking)
+                            {
+                                var matched = readyPlayers.ToList();
+                                foreach (var m in matched)
+                                {
+                                    RemoveFromQueueInternal(m.Player, m.Label);
+                                }
+                                readyPlayers.Clear();
 
+                                _events.OnMatchFound(
+                                    matched.Select(m => m.Player).ToList(),
+                                    firstPlayerQueueInfo.Label
+                                );
+                            }
+                            else
+                            {
+                                RemoveFromQueueInternal(
+                                    firstPlayerQueueInfo.Player,
+                                    firstPlayerQueueInfo.Label
+                                );
+                                readyPlayers.RemoveAt(0);
+
+                                _events.OnMatchNotFound(
+                                    firstPlayerQueueInfo.Player,
+                                    firstPlayerQueueInfo.Label
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    else
+                    {
+                        var matched = readyPlayers.Take(matchSize).ToList();
+                        readyPlayers.RemoveRange(0, matchSize);
+
+                        // Remove them from the actual queue
+                        foreach (var m in matched)
+                        {
+                            RemoveFromQueueInternal(m.Player, m.Label);
+                        }
+
+                        var labelForEvent = matched[0].Label;
                         _events.OnMatchFound(
                             matched.Select(m => m.Player).ToList(),
                             labelForEvent
                         );
-                    }
-                    else
-                    {
-                        // Not enough players to fill a match
-                        if (waitTime <= _options.MaximumWaitTime)
-                            continue;
-
-                        // Check if we allow bots
-                        if (_options.EnableBotMatchmaking)
-                        {
-                            // Fill with bots or placeholders
-                            foreach (var m in matched)
-                                RemoveFromQueueInternal(m.Player, m.Label);
-
-                            _events.OnMatchFound(
-                                matched.Select(m => m.Player).ToList(),
-                                labelForEvent
-                            );
-                        }
-                        else
-                        {
-                            // No bots => remove from queue, raise "not found"
-                            RemoveFromQueueInternal(item.Player, item.Label);
-                            _events.OnMatchNotFound(item.Player, labelForEvent);
-                        }
                     }
                 }
             }

@@ -42,7 +42,8 @@ public static class BuilderExtension
         services.AddSingleton<MatchmakerEvents<TPlayer, TLabel>>();
 
         // Add the hosted matchmaking service
-        services.AddHostedService<KarizmaMatchMakerService<TPlayer, TLabel>>();
+        services.AddSingleton<KarizmaMatchMakerService<TPlayer, TLabel>>();
+        services.AddHostedService(provider => provider.GetRequiredService<KarizmaMatchMakerService<TPlayer, TLabel>>());
 
         return services;
     }
