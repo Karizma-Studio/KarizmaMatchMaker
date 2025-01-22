@@ -112,6 +112,21 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     }
 
     /// <summary>
+    /// Join a room by code.
+    /// </summary>
+    public Task JoinRoomAsync(TPlayer player, string roomCode)
+    {
+        if (_rooms.TryGetValue(roomCode, out var room))
+        {
+            if (room.AddPlayer(player))
+            {
+                _events.OnJoinedRoom(player, roomCode);
+            }
+        }
+        return Task.CompletedTask;
+    }
+    
+    /// <summary>
     /// Kick a player from a room (only if the caller is host).
     /// </summary>
     public Task KickFromRoomAsync(TPlayer hostPlayer, TPlayer targetPlayer, string roomCode)
