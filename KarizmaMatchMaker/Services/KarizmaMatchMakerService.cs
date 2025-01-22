@@ -13,19 +13,15 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     where TLabel : IMatchMakingLabel
 {
     private readonly ConcurrentQueue<PlayerQueueInfo<TPlayer, TLabel>> _queue = new();
-
-    // Rooms are still stored in a thread-safe ConcurrentDictionary
     private readonly ConcurrentDictionary<string, RoomInfo<TPlayer, TLabel>> _rooms = new();
-
     private readonly MatchmakerOptions _options;
     private readonly MatchmakerEvents<TPlayer, TLabel> _events;
 
     // A SemaphoreSlim for async locking around queue operations.
-    // We can also use separate semaphores for queue & rooms if needed.
-    private readonly SemaphoreSlim _queueSemaphore = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim _queueSemaphore = new(1, 1);
 
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(1);
-    private readonly Random _random = new Random();
+    private readonly Random _random = new();
 
     public KarizmaMatchMakerService(
         IOptions<MatchmakerOptions> options,
