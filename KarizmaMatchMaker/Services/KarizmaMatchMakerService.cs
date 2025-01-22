@@ -94,19 +94,18 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// Create a room with a random code and optional TLabel for the match.
     /// Rooms are not processed in the main queue, so they're only joinable by code.
     /// </summary>
-    public string CreateRoomAsync(TPlayer hostPlayer, TLabel? matchLabel = default)
+    public string CreateRoom(TPlayer hostPlayer, TLabel? matchLabel = default)
     {
         // Generate unique code
         string roomCode;
         do
         {
             roomCode = _random.Next(0, 999999).ToString("D6");
-        }
-        while (_rooms.ContainsKey(roomCode));
+        } while (_rooms.ContainsKey(roomCode));
 
         var roomInfo = new RoomInfo<TPlayer, TLabel>(roomCode, hostPlayer, matchLabel);
         _rooms[roomCode] = roomInfo;
-
+        
         _events.OnJoinedRoom(hostPlayer, roomCode);
         return roomCode;
     }
@@ -114,88 +113,131 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Join a room by code.
     /// </summary>
-    public Task JoinRoomAsync(TPlayer player, string roomCode)
+    public async Task JoinRoomAsync(TPlayer player, string roomCode)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
+        if (!_rooms.TryGetValue(roomCode, out var room)) return;
+
+        await room.LockAsync();
+
+        try
         {
             if (room.AddPlayer(player))
             {
                 _events.OnJoinedRoom(player, roomCode);
             }
         }
-        return Task.CompletedTask;
+        finally
+        {
+            room.Unlock();
+        }
     }
 
     /// <summary>
     /// Kick a player from a room (only if the caller is host).
     /// </summary>
-    public Task KickFromRoomAsync(TPlayer hostPlayer, TPlayer targetPlayer, string roomCode)
+    public async Task KickFromRoomAsync(TPlayer hostPlayer, TPlayer targetPlayer, string roomCode)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
+        if (!_rooms.TryGetValue(roomCode, out var room))
+            throw new InvalidOperationException("Room not found.");
+
+        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+            throw new InvalidOperationException("Only the host can kick players.");
+
+        await room.LockAsync();
+
+        try
         {
-            if (Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+            if (room.RemovePlayer(targetPlayer))
             {
-                if (room.RemovePlayer(targetPlayer))
-                {
-                    _events.OnKickedFromRoom(targetPlayer, roomCode);
-                }
+                _events.OnKickedFromRoom(targetPlayer, roomCode);
             }
         }
-        return Task.CompletedTask;
+        finally
+        {
+            room.Unlock();
+        }
     }
 
     /// <summary>
     /// Leave a room (remove player from the room).
     /// </summary>
-    public Task LeaveRoomAsync(TPlayer player, string roomCode)
+    public async Task LeaveRoomAsync(TPlayer player, string roomCode)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
+        if (!_rooms.TryGetValue(roomCode, out var room))
+            throw new InvalidOperationException("Room not found.");
+
+        await room.LockAsync();
+
+        try
         {
             if (room.RemovePlayer(player))
             {
                 _events.OnPlayerLeftRoom(player, roomCode);
             }
         }
-        return Task.CompletedTask;
+        finally
+        {
+            room.Unlock();
+        }
     }
 
     /// <summary>
     /// Start the match in the given room (only by host).
     /// Removes the room afterward.
     /// </summary>
-    public Task StartRoomAsync(TPlayer hostPlayer, string roomCode)
+    public async Task StartRoomAsync(TPlayer hostPlayer, string roomCode)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
+        if (!_rooms.TryGetValue(roomCode, out var room))
+            throw new InvalidOperationException("Room not found.");
+
+        await room.LockAsync();
+
+        try
         {
-            if (Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+            if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+                throw new InvalidOperationException("Only the host can start the room.");
+
+            var playersInRoom = room.GetPlayers().ToList();
+            if (room.MatchLabel != null && playersInRoom.Count != room.MatchLabel.GetMatchPlayersSize())
             {
-                var playersInRoom = room.GetPlayers().ToList();
-                // Use the room's label if it exists
-                var label = room.MatchLabel;
-
-                _events.OnMatchFound(playersInRoom, label!);
-
-                _rooms.TryRemove(roomCode, out _);
+                throw new InvalidOperationException("Not enough players to start the match.");
             }
+
+            // Use the room's label if it exists
+            var label = room.MatchLabel;
+
+            _events.OnMatchFound(playersInRoom, label!);
+
+            _rooms.TryRemove(roomCode, out _);
         }
-        return Task.CompletedTask;
+        finally
+        {
+            room.Unlock();
+        }
     }
 
     /// <summary>
     /// Update the room's match label (only the host can do this).
     /// </summary>
-    public Task UpdateRoomLabelAsync(TPlayer hostPlayer, string roomCode, TLabel newLabel)
+    public async Task UpdateRoomLabelAsync(TPlayer hostPlayer, string roomCode, TLabel newLabel)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
-        {
-            if (Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
-            {
-                room.UpdateMatchLabel(newLabel);
+        if (!_rooms.TryGetValue(roomCode, out var room))
+            throw new InvalidOperationException("Room not found.");
 
-                _events.OnLabelUpdated(roomCode, newLabel);
-            }
+        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+            throw new InvalidOperationException("Only the host can update the room label.");
+
+        await room.LockAsync();
+        try
+        {
+            room.UpdateMatchLabel(newLabel);
+
+            _events.OnLabelUpdated(roomCode, newLabel);
         }
-        return Task.CompletedTask;
+        finally
+        {
+            room.Unlock();
+        }
     }
 
     /// <summary>
@@ -224,13 +266,12 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Get all players in a specific room by code.
     /// </summary>
-    public Task<IEnumerable<TPlayer>> GetRoomPlayersAsync(string roomCode)
+    public IEnumerable<TPlayer> GetRoomPlayersAsync(string roomCode)
     {
-        if (_rooms.TryGetValue(roomCode, out var room))
-        {
-            return Task.FromResult(room.GetPlayers());
-        }
-        return Task.FromResult(Enumerable.Empty<TPlayer>());
+        if (!_rooms.TryGetValue(roomCode, out var room))
+            throw new InvalidOperationException("Room not found.");
+
+        return room.GetPlayers();
     }
 
     #endregion
@@ -302,6 +343,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                                 {
                                     RemoveFromQueueInternal(m.Player, m.Label);
                                 }
+
                                 readyPlayers.Clear();
 
                                 _events.OnMatchFound(
@@ -323,6 +365,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                                 );
                             }
                         }
+
                         break;
                     }
                     else
