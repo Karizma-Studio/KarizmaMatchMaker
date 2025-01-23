@@ -1,0 +1,34 @@
+name: Publish NuGet Packages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-service:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore Server dependencies
+        run: dotnet restore KarizmaMatchMaker/KarizmaMatchMaker.csproj
+
+      - name: Build Server project
+        run: dotnet build KarizmaMatchMaker/KarizmaMatchMaker.csproj --configuration Release --no-restore
+
+      - name: Pack Server project
+        run: dotnet pack KarizmaMatchMaker/KarizmaMatchMaker.csproj --configuration Release --no-build --output ./nupkg
+
+      - name: Publish Server package to NuGet
+        run: dotnet nuget push "./nupkg/*.nupkg" --api-key ${{ secrets.KARIZMAMATCHMAKER_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.KARIZMAMATCHMAKER_API_KEY }}
