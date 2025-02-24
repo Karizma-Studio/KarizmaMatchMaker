@@ -10,7 +10,7 @@ internal class RoomInfo<TPlayer, TLabel>
     public string RoomCode { get; }
     public TPlayer HostPlayer { get; }
     public TLabel? MatchLabel { get; private set; }
-    
+
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     private readonly ConcurrentDictionary<string, TPlayer> _players;
@@ -36,7 +36,7 @@ internal class RoomInfo<TPlayer, TLabel>
     {
         MatchLabel = newLabel;
     }
-    
+
     public async Task LockAsync()
     {
         await _semaphore.WaitAsync();
@@ -45,5 +45,15 @@ internal class RoomInfo<TPlayer, TLabel>
     public void Unlock()
     {
         _semaphore.Release();
+    }
+
+    public RoomInfoDto<TPlayer, TLabel> GetDto()
+    {
+        return new RoomInfoDto<TPlayer, TLabel>
+        {
+            RoomCode = RoomCode,
+            HostPlayer = HostPlayer,
+            MatchLabel = MatchLabel
+        };
     }
 }

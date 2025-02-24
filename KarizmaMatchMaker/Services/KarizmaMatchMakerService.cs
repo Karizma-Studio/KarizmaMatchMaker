@@ -107,9 +107,17 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
         var roomInfo = new RoomInfo<TPlayer, TLabel>(roomCode, hostPlayer, matchLabel);
         _rooms[roomCode] = roomInfo;
         _playerRooms[hostPlayer.GetPlayerId()] = roomCode;
-        
+
         _events.OnJoinedRoom(hostPlayer, roomCode);
         return roomCode;
+    }
+
+    /// <summary>
+    /// Retrieves all available rooms and returns their DTO representations.
+    /// </summary>
+    public IEnumerable<RoomInfoDto<TPlayer, TLabel>> GetAllAvailableRooms()
+    {
+        return _rooms.Values.Select(room => room.GetDto());
     }
 
     /// <summary>
@@ -161,6 +169,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             room.Unlock();
         }
     }
+    
 
     /// <summary>
     /// Leave a room (remove player from the room).
@@ -214,7 +223,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             {
                 _playerRooms.TryRemove(player.GetPlayerId(), out _);
             }
-            
+
             _rooms.TryRemove(roomCode, out _);
         }
         finally
@@ -269,10 +278,19 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             _queueSemaphore.Release();
         }
     }
-    
+
     /// <summary>
     /// Get user's current room by player ID.
     /// </summary>
+    public string? GetRoomCodeByPlayerId(string playerId)
+    {
+        if (_playerRooms.TryGetValue(playerId, out var roomCode) && _rooms.TryGetValue(roomCode, out var room))
+        {
+            return room.RoomCode;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Get all players in a specific room by code.
