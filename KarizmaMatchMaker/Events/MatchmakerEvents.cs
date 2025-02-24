@@ -14,7 +14,7 @@ public class MatchmakerEvents<TPlayer, TLabel>
     /// <summary>
     /// Raised when a set of players is successfully matched (players, label).
     /// </summary>
-    public event Action<List<TPlayer>, TLabel>? MatchFound;
+    public event Action<List<TPlayer>, TLabel?>? MatchFound;
 
     /// <summary>
     /// Raised when a player times out (exceeds maximum wait time) and no bots are enabled.
@@ -49,7 +49,7 @@ public class MatchmakerEvents<TPlayer, TLabel>
     public void OnJoinedMatchmaking(TPlayer player, TLabel label)
         => JoinedMatchmaking?.Invoke(player, label);
 
-    public void OnMatchFound(List<TPlayer> players, TLabel label)
+    public void OnMatchFound(List<TPlayer> players, TLabel? label)
         => MatchFound?.Invoke(players, label);
 
     public void OnMatchNotFound(TPlayer player, TLabel label)
