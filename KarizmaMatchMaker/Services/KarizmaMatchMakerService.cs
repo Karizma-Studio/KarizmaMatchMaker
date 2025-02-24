@@ -123,19 +123,19 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Join a room by code.
     /// </summary>
-    public async Task JoinRoomAsync(TPlayer player, string roomCode)
+    public async Task<bool> JoinRoomAsync(TPlayer player, string roomCode)
     {
-        if (!_rooms.TryGetValue(roomCode, out var room)) return;
+        if (!_rooms.TryGetValue(roomCode, out var room)) return false;
 
         await room.LockAsync();
 
         try
         {
-            if (room.AddPlayer(player))
-            {
-                _events.OnJoinedRoom(player, roomCode);
-                _playerRooms[player.GetPlayerId()] = roomCode;
-            }
+            if (!room.AddPlayer(player)) return false;
+
+            _events.OnJoinedRoom(player, roomCode);
+            _playerRooms[player.GetPlayerId()] = roomCode;
+            return true;
         }
         finally
         {
@@ -169,7 +169,15 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             room.Unlock();
         }
     }
-    
+
+    /// <summary>
+    /// Get a room data by room Id.
+    /// </summary>
+    public RoomInfoDto<TPlayer, TLabel>? GetRoomById(string roomId)
+    {
+        return _rooms.TryGetValue(roomId, out var room) ? room.GetDto() : null;
+    }
+
 
     /// <summary>
     /// Leave a room (remove player from the room).
