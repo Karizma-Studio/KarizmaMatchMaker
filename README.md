@@ -37,7 +37,7 @@ A flexible, **thread-safe**, background **matchmaking service** for .NET, built 
 install via:
 
 ```bash
-dotnet add package KarizmaPlatform.MatchMaker
+dotnet add package KarizmaMatchMaker --version 1.0.0
 ```
 
 
