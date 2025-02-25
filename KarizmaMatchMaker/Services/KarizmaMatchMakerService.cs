@@ -8,29 +8,23 @@ using Microsoft.Extensions.Options;
 
 namespace KarizmaPlatform.MatchMaker.Services;
 
-public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
+public class KarizmaMatchMakerService<TPlayer, TLabel>(
+    IOptions<MatchmakerOptions> options,
+    MatchmakerEvents<TPlayer, TLabel> events)
+    : BackgroundService
     where TPlayer : IMatchMakingPlayer
     where TLabel : IMatchMakingLabel
 {
     private readonly ConcurrentQueue<PlayerQueueInfo<TPlayer, TLabel>> _queue = new();
     private readonly ConcurrentDictionary<string, RoomInfo<TPlayer, TLabel>> _rooms = new();
     private readonly ConcurrentDictionary<string, string> _playerRooms = new();
-    private readonly MatchmakerOptions _options;
-    private readonly MatchmakerEvents<TPlayer, TLabel> _events;
+    private readonly MatchmakerOptions _options = options.Value;
 
     // A SemaphoreSlim for async locking around queue operations.
     private readonly SemaphoreSlim _queueSemaphore = new(1, 1);
 
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(1);
     private readonly Random _random = new();
-
-    public KarizmaMatchMakerService(
-        IOptions<MatchmakerOptions> options,
-        MatchmakerEvents<TPlayer, TLabel> events)
-    {
-        _options = options.Value;
-        _events = events;
-    }
 
     #region Public API
 
@@ -50,18 +44,18 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
             _queueSemaphore.Release();
         }
 
-        _events.OnJoinedMatchmaking(player, label);
+        events.OnJoinedMatchmaking(player, label);
     }
 
     /// <summary>
     /// Remove a player from the queue (if present).
     /// </summary>
-    public async Task RemoveFromQueueAsync(TPlayer player, TLabel label)
+    public async Task<TPlayer?> RemoveFromQueueAsync(string playerId)
     {
         await _queueSemaphore.WaitAsync();
         try
         {
-            RemoveFromQueueInternal(player, label);
+            return RemoveFromQueueInternal(playerId);
         }
         finally
         {
@@ -72,28 +66,30 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Leave matchmaking entirely.
     /// </summary>
-    public async Task LeaveMatchmakingAsync(TPlayer player, TLabel label)
+    public async Task<TPlayer?> LeaveMatchmakingAsync(string playerId, TLabel label)
     {
         await _queueSemaphore.WaitAsync();
+        TPlayer? player;
         try
         {
-            // Quick check; if not present, do nothing
-            if (!_queue.Any(q => Equals(q.Player.GetPlayerId(), player.GetPlayerId())))
-                return;
-
-            RemoveFromQueueInternal(player, label);
+            player = RemoveFromQueueInternal(playerId);
         }
         finally
         {
             _queueSemaphore.Release();
         }
 
-        _events.OnPlayerLeftMatchmaking(player, label);
+        if(player != null)
+        {
+            events.OnPlayerLeftMatchmaking(player, label);
+        }
+        
+        return player;
     }
 
     /// <summary>
     /// Create a room with a random code and optional TLabel for the match.
-    /// Rooms are not processed in the main queue, so they're only joinable by code.
+    /// Rooms are not processed in the main queue, so they're only join-able by code.
     /// </summary>
     public string CreateRoom(TPlayer hostPlayer, TLabel? matchLabel = default)
     {
@@ -108,7 +104,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
         _rooms[roomCode] = roomInfo;
         _playerRooms[hostPlayer.GetPlayerId()] = roomCode;
 
-        _events.OnJoinedRoom(hostPlayer, roomCode);
+        events.OnJoinedRoom(hostPlayer, roomCode);
         return roomCode;
     }
 
@@ -133,7 +129,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
         {
             if (!room.AddPlayer(player)) return false;
 
-            _events.OnJoinedRoom(player, roomCode);
+            events.OnJoinedRoom(player, roomCode);
             _playerRooms[player.GetPlayerId()] = roomCode;
             return true;
         }
@@ -146,21 +142,22 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Kick a player from a room (only if the caller is host).
     /// </summary>
-    public async Task KickFromRoomAsync(TPlayer hostPlayer, TPlayer targetPlayer, string roomCode)
+    public async Task KickFromRoomAsync(string hostPlayerId, string targetPlayerId, string roomCode)
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
 
-        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayerId))
             throw new InvalidOperationException("Only the host can kick players.");
 
         await room.LockAsync();
 
         try
         {
-            if (room.RemovePlayer(targetPlayer))
+            if (room.RemovePlayer(targetPlayerId))
             {
-                _events.OnKickedFromRoom(targetPlayer, roomCode);
+                var targetPlayer = room.GetPlayer(targetPlayerId);
+                events.OnKickedFromRoom(targetPlayer, roomCode);
                 _playerRooms.TryRemove(targetPlayer.GetPlayerId(), out _);
             }
         }
@@ -171,7 +168,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     }
 
     /// <summary>
-    /// Get a room data by room Id.
+    /// Get a room data by room's id.
     /// </summary>
     public RoomInfoDto<TPlayer, TLabel>? GetRoomById(string roomId)
     {
@@ -182,7 +179,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Leave a room (remove player from the room).
     /// </summary>
-    public async Task LeaveRoomAsync(TPlayer player, string roomCode)
+    public async Task LeaveRoomAsync(string playerId, string roomCode)
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
@@ -191,9 +188,10 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
 
         try
         {
-            if (room.RemovePlayer(player))
+            var player = room.GetPlayer(playerId);
+            if (room.RemovePlayer(playerId))
             {
-                _events.OnPlayerLeftRoom(player, roomCode);
+                events.OnPlayerLeftRoom(player, roomCode);
                 _playerRooms.TryRemove(player.GetPlayerId(), out _);
             }
         }
@@ -207,7 +205,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// Start the match in the given room (only by host).
     /// Removes the room afterward.
     /// </summary>
-    public async Task StartRoomAsync(TPlayer hostPlayer, string roomCode, bool force = false)
+    public async Task StartRoomAsync(string hostPlayerId, string roomCode, bool force = false)
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
@@ -216,7 +214,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
 
         try
         {
-            if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+            if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayerId))
                 throw new InvalidOperationException("Only the host can start the room.");
 
             var playersInRoom = room.GetPlayers().ToList();
@@ -225,7 +223,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                 throw new InvalidOperationException("Not enough players to start the match.");
             }
 
-            _events.OnMatchFound(playersInRoom, room.MatchLabel);
+            events.OnMatchFound(playersInRoom, room.MatchLabel);
 
             foreach (var player in playersInRoom)
             {
@@ -243,12 +241,12 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     /// <summary>
     /// Update the room's match label (only the host can do this).
     /// </summary>
-    public async Task UpdateRoomLabelAsync(TPlayer hostPlayer, string roomCode, TLabel newLabel)
+    public async Task UpdateRoomLabelAsync(string hostPlayerId, string roomCode, TLabel newLabel)
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
 
-        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayer.GetPlayerId()))
+        if (!Equals(room.HostPlayer.GetPlayerId(), hostPlayerId))
             throw new InvalidOperationException("Only the host can update the room label.");
 
         await room.LockAsync();
@@ -256,7 +254,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
         {
             room.UpdateMatchLabel(newLabel);
 
-            _events.OnLabelUpdated(roomCode, newLabel);
+            events.OnLabelUpdated(roomCode, newLabel);
         }
         finally
         {
@@ -378,12 +376,12 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                                 var matched = readyPlayers.ToList();
                                 foreach (var m in matched)
                                 {
-                                    RemoveFromQueueInternal(m.Player, m.Label);
+                                    RemoveFromQueueInternal(m.Player.GetPlayerId());
                                 }
 
                                 readyPlayers.Clear();
 
-                                _events.OnMatchFound(
+                                events.OnMatchFound(
                                     matched.Select(m => m.Player).ToList(),
                                     firstPlayerQueueInfo.Label
                                 );
@@ -391,12 +389,11 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                             else
                             {
                                 RemoveFromQueueInternal(
-                                    firstPlayerQueueInfo.Player,
-                                    firstPlayerQueueInfo.Label
+                                    firstPlayerQueueInfo.Player.GetPlayerId()
                                 );
                                 readyPlayers.RemoveAt(0);
 
-                                _events.OnMatchNotFound(
+                                events.OnMatchNotFound(
                                     firstPlayerQueueInfo.Player,
                                     firstPlayerQueueInfo.Label
                                 );
@@ -413,11 +410,11 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
                         // Remove them from the actual queue
                         foreach (var m in matched)
                         {
-                            RemoveFromQueueInternal(m.Player, m.Label);
+                            RemoveFromQueueInternal(m.Player.GetPlayerId());
                         }
 
                         var labelForEvent = matched[0].Label;
-                        _events.OnMatchFound(
+                        events.OnMatchFound(
                             matched.Select(m => m.Player).ToList(),
                             labelForEvent
                         );
@@ -436,25 +433,32 @@ public class KarizmaMatchMakerService<TPlayer, TLabel> : BackgroundService
     #region Private Helpers
 
     /// <summary>
-    /// Internal method to remove (player, label) from queue; 
+    /// Remove a player from the queue by player ID.
     /// caller must hold the semaphore.
     /// </summary>
-    private void RemoveFromQueueInternal(TPlayer player, TLabel label)
+    private TPlayer? RemoveFromQueueInternal(string playerId)
     {
-        var tempList = new List<PlayerQueueInfo<TPlayer, TLabel>>();
-
+        var tempQueue = new ConcurrentQueue<PlayerQueueInfo<TPlayer, TLabel>>();
+        TPlayer? removedPlayer = default;
+    
         while (_queue.TryDequeue(out var current))
         {
-            if (!Equals(current.Player, player) || !Equals(current.Label, label))
+            if (current.Player.GetPlayerId() == playerId)
             {
-                tempList.Add(current);
+                removedPlayer = current.Player;
+            }
+            else
+            {
+                tempQueue.Enqueue(current);
             }
         }
-
-        foreach (var item in tempList)
+    
+        while (tempQueue.TryDequeue(out var item))
         {
             _queue.Enqueue(item);
         }
+    
+        return removedPlayer;
     }
 
     #endregion

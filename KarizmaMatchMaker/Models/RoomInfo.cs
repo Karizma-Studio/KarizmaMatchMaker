@@ -32,6 +32,13 @@ internal class RoomInfo<TPlayer, TLabel>
     public bool RemovePlayer(TPlayer player)
         => _players.TryRemove(player.GetPlayerId(), out _);
 
+    public bool RemovePlayer(string playerId)
+        => _players.TryRemove(playerId, out _);
+
+    public TPlayer GetPlayer(string playerId) => _players[playerId];
+    
+    public bool PlayerExists(string playerId) => _players.ContainsKey(playerId);
+
     public void UpdateMatchLabel(TLabel newLabel)
     {
         MatchLabel = newLabel;
