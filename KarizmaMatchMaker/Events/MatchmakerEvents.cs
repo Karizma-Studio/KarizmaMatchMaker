@@ -40,12 +40,17 @@ public class MatchmakerEvents<TPlayer, TLabel>
     /// Raised when a player leaves matchmaking (player, label).
     /// </summary>
     public event Action<TPlayer, TLabel>? LeftMatchmaking;
-    
+
     /// <summary>
     /// Raised when a label is updated (code, label).
     /// </summary>
     public event Action<string, TLabel>? LabelUpdated;
     
+    /// <summary>
+    /// Raised when a room is destroyed (roomCode).
+    /// </summary>
+    public event Action<string>? RoomDestroyed;
+
     public void OnJoinedMatchmaking(TPlayer player, TLabel label)
         => JoinedMatchmaking?.Invoke(player, label);
 
@@ -66,7 +71,10 @@ public class MatchmakerEvents<TPlayer, TLabel>
 
     public void OnPlayerLeftMatchmaking(TPlayer player, TLabel label)
         => LeftMatchmaking?.Invoke(player, label);
-    
+
     public void OnLabelUpdated(string code, TLabel label)
         => LabelUpdated?.Invoke(code, label);
+
+    public void OnRoomDestroyed(string roomCode)
+        => RoomDestroyed?.Invoke(roomCode);
 }

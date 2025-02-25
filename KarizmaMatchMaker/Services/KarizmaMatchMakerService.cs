@@ -183,11 +183,30 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
-
+        
         await room.LockAsync();
-
         try
         {
+            if(room.HostPlayer.GetPlayerId() == playerId)
+            {
+                try
+                {
+                    var playersInRoom = room.GetPlayers().ToList();
+                    foreach (var p in playersInRoom)
+                    {
+                        _playerRooms.TryRemove(p.GetPlayerId(), out _);
+                    }
+
+                    _rooms.TryRemove(roomCode, out _);
+                    events.OnRoomDestroyed(roomCode);
+                }
+                finally
+                {
+                    room.Unlock();
+                }
+
+                return;
+            }
             var player = room.GetPlayer(playerId);
             if (room.RemovePlayer(playerId))
             {
