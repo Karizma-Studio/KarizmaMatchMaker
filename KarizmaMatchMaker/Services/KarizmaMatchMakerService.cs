@@ -154,11 +154,11 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
 
         try
         {
+            var targetPlayer = room.GetPlayer(targetPlayerId);
             if (room.RemovePlayer(targetPlayerId))
             {
-                var targetPlayer = room.GetPlayer(targetPlayerId);
                 events.OnKickedFromRoom(targetPlayer, roomCode);
-                _playerRooms.TryRemove(targetPlayer.GetPlayerId(), out _);
+                _playerRooms.TryRemove(targetPlayerId, out _);
             }
         }
         finally
