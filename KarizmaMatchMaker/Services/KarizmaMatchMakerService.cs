@@ -189,22 +189,14 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
         {
             if(room.HostPlayer.GetPlayerId() == playerId)
             {
-                try
+                var playersInRoom = room.GetPlayers().ToList();
+                foreach (var p in playersInRoom)
                 {
-                    var playersInRoom = room.GetPlayers().ToList();
-                    foreach (var p in playersInRoom)
-                    {
-                        _playerRooms.TryRemove(p.GetPlayerId(), out _);
-                    }
-
-                    _rooms.TryRemove(roomCode, out _);
-                    events.OnRoomDestroyed(roomCode);
-                }
-                finally
-                {
-                    room.Unlock();
+                    _playerRooms.TryRemove(p.GetPlayerId(), out _);
                 }
 
+                _rooms.TryRemove(roomCode, out _);
+                events.OnRoomDestroyed(roomCode);
                 return;
             }
             var player = room.GetPlayer(playerId);
