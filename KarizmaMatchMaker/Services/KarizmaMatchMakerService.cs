@@ -79,11 +79,11 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
             _queueSemaphore.Release();
         }
 
-        if(player != null)
+        if (player != null)
         {
             events.OnPlayerLeftMatchmaking(player, label);
         }
-        
+
         return player;
     }
 
@@ -178,16 +178,17 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
 
     /// <summary>
     /// Leave a room (remove player from the room).
+    /// Returns if room closed or not.
     /// </summary>
-    public async Task LeaveRoomAsync(string playerId, string roomCode)
+    public async Task<bool> LeaveRoomAsync(string playerId, string roomCode)
     {
         if (!_rooms.TryGetValue(roomCode, out var room))
             throw new InvalidOperationException("Room not found.");
-        
+
         await room.LockAsync();
         try
         {
-            if(room.HostPlayer.GetPlayerId() == playerId)
+            if (room.HostPlayer.GetPlayerId() == playerId)
             {
                 var playersInRoom = room.GetPlayers().ToList();
                 foreach (var p in playersInRoom)
@@ -197,14 +198,17 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
 
                 _rooms.TryRemove(roomCode, out _);
                 events.OnRoomDestroyed(roomCode);
-                return;
+                return true;
             }
+
             var player = room.GetPlayer(playerId);
             if (room.RemovePlayer(playerId))
             {
                 events.OnPlayerLeftRoom(player, roomCode);
                 _playerRooms.TryRemove(player.GetPlayerId(), out _);
             }
+
+            return false;
         }
         finally
         {
@@ -451,7 +455,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
     {
         var tempQueue = new ConcurrentQueue<PlayerQueueInfo<TPlayer, TLabel>>();
         TPlayer? removedPlayer = default;
-    
+
         while (_queue.TryDequeue(out var current))
         {
             if (current.Player.GetPlayerId() == playerId)
@@ -463,12 +467,12 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
                 tempQueue.Enqueue(current);
             }
         }
-    
+
         while (tempQueue.TryDequeue(out var item))
         {
             _queue.Enqueue(item);
         }
-    
+
         return removedPlayer;
     }
 
