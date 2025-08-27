@@ -16,6 +16,7 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
     where TLabel : IMatchMakingLabel
 {
     private readonly ConcurrentQueue<PlayerQueueInfo<TPlayer, TLabel>> _queue = new();
+    private readonly ConcurrentDictionary<string, byte> _playersInMatchMake = new();
     private readonly ConcurrentDictionary<string, RoomInfo<TPlayer, TLabel>> _rooms = new();
     private readonly ConcurrentDictionary<string, string> _playerRooms = new();
     private readonly MatchmakerOptions _options = options.Value;
@@ -31,20 +32,26 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
     /// <summary>
     /// Async method to join matchmaking queue.
     /// </summary>
-    public async Task JoinMatchmakingAsync(TPlayer player, TLabel label)
+    public async Task<bool> JoinMatchmakingAsync(TPlayer player, TLabel label)
     {
         await _queueSemaphore.WaitAsync();
         try
         {
+            if (_playersInMatchMake.ContainsKey(player.GetPlayerId()))
+            {
+                return false;
+            }
+
             var info = new PlayerQueueInfo<TPlayer, TLabel>(player, label);
             _queue.Enqueue(info);
+            events.OnJoinedMatchmaking(player, label);
+            _playersInMatchMake.TryAdd(player.GetPlayerId(), 0);
+            return true;
         }
         finally
         {
             _queueSemaphore.Release();
         }
-
-        events.OnJoinedMatchmaking(player, label);
     }
 
     /// <summary>
@@ -471,6 +478,11 @@ public class KarizmaMatchMakerService<TPlayer, TLabel>(
         while (tempQueue.TryDequeue(out var item))
         {
             _queue.Enqueue(item);
+        }
+
+        if (removedPlayer != null)
+        {
+            _playersInMatchMake.TryRemove(removedPlayer.GetPlayerId(), out _);
         }
 
         return removedPlayer;
